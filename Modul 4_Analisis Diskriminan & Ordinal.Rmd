@@ -1,0 +1,181 @@
+---
+title: Implementasi Analisis Diskriminan dan Regresi Logistik Ordinal untuk Analisis
+  Faktor yang Mempengaruhi Tingkat Obesitas
+author: "Nor Hofifah"
+date: "2026-05-03"
+output: html_document
+---
+
+Penelitian ini bertujuan untuk menganalisis faktor-faktor yang mempengaruhi tingkat obesitas menggunakan metode analisis diskriminan dan regresi logistik ordinal. Variabel dependen yang digunakan adalah *NObeyesdad* yang memiliki 7 kategori berurutan.
+
+*1. Import Library*
+```{r}
+library(readxl)
+library(ggplot2)
+library(biotools)
+library(car)
+library(MASS)
+library(pscl)
+library(VGAM)
+```
+*2. Load Data*
+```{r}
+data <- read.csv(file.choose())
+
+str(data)
+summary(data)
+```
+Dataset terdiri dari 2111 observasi dan 17 variabel. Variabel utama yang digunakan adalah Age, Height, Weight, FCVC, dan FAF.
+
+*3. Data Cleaning*
+```{r}
+sum(is.na(data))
+colSums(is.na(data))
+```
+Tidak ditemukan missing value pada dataset sehingga seluruh data dapat digunakan untuk analisis.
+
+*4. Transformasi Variabel*
+```{r}
+data$NObeyesdad <- factor(data$NObeyesdad,
+                          levels = c("Insufficient_Weight",
+                                     "Normal_Weight",
+                                     "Overweight_Level_I",
+                                     "Overweight_Level_II",
+                                     "Obesity_Type_I",
+                                     "Obesity_Type_II",
+                                     "Obesity_Type_III"),
+                          ordered = TRUE)
+
+table(data$NObeyesdad)
+```
+Variabel NObeyesdad diubah menjadi faktor ordinal agar sesuai dengan metode regresi logistik ordinal.
+
+*5. Visualisasi Data*
+```{r}
+ggplot(data, aes(x=NObeyesdad)) +
+  geom_bar(fill="skyblue") +
+  theme_minimal()
+```
+Distribusi kategori obesitas relatif merata, dengan jumlah terbesar pada Obesity Type I.
+
+```{r}
+ggplot(data, aes(x=NObeyesdad, y=Weight)) +
+  geom_boxplot(fill="pink") +
+  theme_minimal()
+```
+Semakin tinggi kategori obesitas, maka berat badan cenderung meningkat.
+
+```{r}
+ggplot(data, aes(x=NObeyesdad, y=FAF)) +
+  geom_boxplot(fill="yellow") +
+  theme_minimal()
+```
+Kategori obesitas tinggi cenderung memiliki aktivitas fisik yang lebih rendah.
+
+```{r}
+ggplot(data, aes(x=Weight, y=FAF, color=NObeyesdad)) +
+  geom_point() +
+  theme_minimal()
+```
+Terdapat kecenderungan hubungan negatif antara berat badan dan aktivitas fisik.
+
+*6. Uji Asumsi*
+*Normalitas*
+```{r}
+shapiro.test(data$Age)
+shapiro.test(data$Height)
+shapiro.test(data$Weight)
+```
+Semua variabel memiliki p-value < 0.05 sehingga tidak berdistribusi normal
+
+*Homogenitas Kovarians*
+```{r}
+data_num <- data[, c("Age","Height","Weight")]
+boxM(data_num, data$NObeyesdad)
+```
+Hasil menunjukkan kovarians tidak homogen.
+
+```{r}
+model_lm <- lm(Age ~ Height + Weight + FCVC + FAF, data=data)
+vif(model_lm)
+```
+Nilai VIF < 10 menunjukkan tidak terdapat multikolinearitas.
+
+*7. Analisis Diskriminan (LDA)*
+```{r}
+lda_model <- lda(NObeyesdad ~ Age + Height + Weight + FCVC + FAF, data=data)
+
+pred <- predict(lda_model)
+cm <- table(pred$class, data$NObeyesdad)
+cm
+
+accuracy <- sum(diag(cm)) / sum(cm)
+accuracy
+
+aper <- 1 - accuracy
+aper
+```
+Model memiliki akurasi sebesar 86.59% dengan tingkat kesalahan (APER) sebesar 13.41%. Hal ini menunjukkan bahwa model mampu mengklasifikasikan data dengan baik.
+
+*8. Regresi Logistik Ordinal*
+*Standarisasi*
+```{r}
+data$Weight_s <- scale(data$Weight)
+data$FAF_s <- scale(data$FAF)
+```
+Standarisasi dilakukan agar variabel memiliki skala yang sama.
+
+*Model*
+```{r}
+model_ord <- polr(NObeyesdad ~ Weight_s + FAF_s, data=data, Hess=TRUE)
+summary(model_ord)
+```
+Weight berpengaruh positif terhadap obesitas, sedangkan FAF berpengaruh negatif.
+
+*Uji Signifikansi Model*
+```{r}
+model_null <- polr(NObeyesdad ~ 1, data=data, Hess=TRUE)
+anova(model_null, model_ord)
+```
+Null Model = 8201.628
+Model = 4238.825
+p-value < 0.05
+Model signifikan secara keseluruhan.
+
+*Koefisien dan p-value*
+```{r}
+ctable <- coef(summary(model_ord))
+p_value <- pnorm(abs(ctable[, "t value"]), lower.tail = FALSE) * 2
+cbind(ctable, p_value)
+```
+Semua variabel signifikan karena p-value < 0.05.
+
+*Odds Ratio*
+```{r}
+exp(coef(model_ord))
+```
+Weight meningkatkan peluang obesitas, sedangkan FAF menurunkan peluang.
+
+*Goodness of Fit*
+```{r}
+pR2(model_ord)
+```
+Nilai Nagelkerke R² tinggi menunjukkan model sangat baik.
+
+*Cutpoint*
+```{r}
+model_ord$zeta
+```
+Cutpoint menunjukkan batas antar kategori obesitas dan tersusun secara berurutan.
+
+*VGAM*
+```{r}
+model_vglm <- vglm(NObeyesdad ~ Weight_s + FAF_s,
+                   family = cumulative(parallel=TRUE),
+                   data=data)
+
+summary(model_vglm)
+```
+Model VGAM menghasilkan hasil yang konsisten dengan model sebelumnya.
+
+*Kesimpulan: Berdasarkan hasil analisis, model analisis diskriminan (LDA) mampu mengklasifikasikan data dengan baik dengan akurasi sebesar 86,59%. Hasil regresi logistik ordinal menunjukkan bahwa berat badan berpengaruh positif terhadap tingkat obesitas, sedangkan aktivitas fisik berpengaruh negatif. Artinya, semakin tinggi berat badan maka peluang obesitas meningkat, sementara aktivitas fisik yang tinggi dapat menurunkan peluang tersebut. Secara keseluruhan, model yang digunakan sudah cukup baik dalam menjelaskan tingkat obesitas.*
